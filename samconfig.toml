@@ -1,0 +1,35 @@
+# More information about the configuration file can be found here:
+# https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-config.html
+version = 0.1
+
+[default.global.parameters]
+stack_name = "candidate_invite"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.validate.parameters]
+lint = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+stack_name = "candidate-invite"
+s3_prefix = "candidate-invite"
+region = "us-east-1"
+parameter_overrides = "SupabaseUrl=\"https://movdawxtyuxoxgtofqrv.supabase.co\" SupabaseKey=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1vdmRhd3h0eXV4b3hndG9mcXJ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0NzgwOTk0MywiZXhwIjoyMDYzMzg1OTQzfQ.9IKCitgqEkk-RR0cSZTY1VdKbfzZVXqotBdAFoKL_wU\""
+image_repositories = []
+
+[default.package.parameters]
+resolve_s3 = true
+
+[default.sync.parameters]
+watch = true
+
+[default.local_start_api.parameters]
+warm_containers = "EAGER"
+
+[default.local_start_lambda.parameters]
+warm_containers = "EAGER"

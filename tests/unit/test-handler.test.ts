@@ -1,65 +1,118 @@
-import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-import { lambdaHandler } from '../../Lambda/app';
-import { expect, describe, it } from '@jest/globals';
+import { lambdaHandler } from '../../functions/app'; // Replace with actual filename
+import * as supabaseHelper from '../../functions/utils/supabasehelper';
+import * as sesHelper from '../../functions/utils/sesHelper';
+import * as templates from '../../functions/utils/emails-templates/templates';
 
-describe('Unit test for app handler', function () {
-    it('verifies successful response', async () => {
-        const event: APIGatewayProxyEvent = {
-            httpMethod: 'get',
-            body: '',
-            headers: {},
-            isBase64Encoded: false,
-            multiValueHeaders: {},
-            multiValueQueryStringParameters: {},
-            path: '/hello',
-            pathParameters: {},
-            queryStringParameters: {},
-            requestContext: {
-                accountId: '123456789012',
-                apiId: '1234',
-                authorizer: {},
-                httpMethod: 'get',
-                identity: {
-                    accessKey: '',
-                    accountId: '',
-                    apiKey: '',
-                    apiKeyId: '',
-                    caller: '',
-                    clientCert: {
-                        clientCertPem: '',
-                        issuerDN: '',
-                        serialNumber: '',
-                        subjectDN: '',
-                        validity: { notAfter: '', notBefore: '' },
-                    },
-                    cognitoAuthenticationProvider: '',
-                    cognitoAuthenticationType: '',
-                    cognitoIdentityId: '',
-                    cognitoIdentityPoolId: '',
-                    principalOrgId: '',
-                    sourceIp: '',
-                    user: '',
-                    userAgent: '',
-                    userArn: '',
-                },
-                path: '/hello',
-                protocol: 'HTTP/1.1',
-                requestId: 'c6af9ac6-7b61-11e6-9a41-93e8deadbeef',
-                requestTimeEpoch: 1428582896000,
-                resourceId: '123456',
-                resourcePath: '/hello',
-                stage: 'dev',
-            },
-            resource: '',
-            stageVariables: {},
-        };
-        const result: APIGatewayProxyResult = await lambdaHandler(event);
+jest.mock('../../functions/utils/supabasehelper');
+jest.mock('../../functions/utils/sesHelper');
+jest.mock('../../functions/utils/emails-templates/templates');
 
-        expect(result.statusCode).toEqual(200);
-        expect(result.body).toEqual(
-            JSON.stringify({
-                message: 'hello world',
-            }),
-        );
-    });
+describe('lambdaHandler', () => {
+  const OLD_ENV = process.env;
+
+  beforeEach(() => {
+    jest.resetModules();
+    process.env = { ...OLD_ENV, SUPABASE_URL: 'test-url', SUPABASE_KEY: 'test-key' };
+  });
+
+  afterAll(() => {
+    process.env = OLD_ENV;
+  });
+
+  const mockSupabase = {
+    from: jest.fn().mockReturnThis(),
+    insert: jest.fn().mockReturnThis(),
+    select: jest.fn(),
+  };
+
+  it('should return 400 if required fields are missing', async () => {
+    const result = await lambdaHandler({ body: '{}' } as any);
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body).message).toMatch(/Missing/);
+  });
+
+  it('should return 500 if candidate insert fails', async () => {
+    (supabaseHelper.supabaseInit as jest.Mock).mockReturnValue(mockSupabase);
+    mockSupabase.select.mockResolvedValueOnce({ data: null, error: 'Insert error' });
+
+    const event = {
+      body: JSON.stringify({
+        candidateName: 'John',
+        candidateEmail: 'john@example.com',
+        url: 'http://test.com',
+      }),
+    };
+
+    const result = await lambdaHandler(event as any);
+    expect(result.statusCode).toBe(500);
+    expect(JSON.parse(result.body).message).toBe('some error happened');
+  });
+
+  it('should return 500 if assessment insert fails', async () => {
+    (supabaseHelper.supabaseInit as jest.Mock).mockReturnValue(mockSupabase);
+
+    mockSupabase.select
+      .mockResolvedValueOnce({ data: [{ id: 1 }], error: null }) // candidate insert
+      .mockResolvedValueOnce({ data: null, error: 'Assessment error' }); // assessment insert
+
+    const event = {
+      body: JSON.stringify({
+        candidateName: 'John',
+        candidateEmail: 'john@example.com',
+        url: 'http://test.com',
+      }),
+    };
+
+    const result = await lambdaHandler(event as any);
+    expect(result.statusCode).toBe(500);
+    expect(JSON.parse(result.body).message).toBe('some error happened');
+  });
+
+  it('should return 500 if SES email send fails', async () => {
+    (supabaseHelper.supabaseInit as jest.Mock).mockReturnValue(mockSupabase);
+    mockSupabase.select
+      .mockResolvedValueOnce({ data: [{ id: 1 }], error: null })
+      .mockResolvedValueOnce({ data: [{ id: 10 }], error: null });
+
+    (templates.emailTemplate as any) = {
+      sendAssignment: jest.fn().mockReturnValue('<html>Email</html>'),
+    };
+    (sesHelper.sendEmailBySES as jest.Mock).mockRejectedValue(new Error('SES error'));
+
+    const event = {
+      body: JSON.stringify({
+        candidateName: 'John',
+        candidateEmail: 'john@example.com',
+        url: 'http://test.com',
+      }),
+    };
+
+    const result = await lambdaHandler(event as any);
+    expect(result.statusCode).toBe(500);
+    expect(JSON.parse(result.body).message).toBe('Assignment email not sent');
+  });
+
+  it('should return 200 on success', async () => {
+    (supabaseHelper.supabaseInit as jest.Mock).mockReturnValue(mockSupabase);
+    mockSupabase.select
+      .mockResolvedValueOnce({ data: [{ id: 1 }], error: null })
+      .mockResolvedValueOnce({ data: [{ id: 10 }], error: null });
+
+    (templates.emailTemplate as any) = {
+      sendAssignment: jest.fn().mockReturnValue('<html>Email</html>'),
+    };
+    (sesHelper.sendEmailBySES as jest.Mock).mockResolvedValue({});
+
+    const event = {
+      body: JSON.stringify({
+        candidateName: 'John',
+        candidateEmail: 'john@example.com',
+        url: 'http://test.com',
+      }),
+    };
+
+    const result = await lambdaHandler(event as any);
+    expect(result.statusCode).toBe(200);
+    expect(JSON.parse(result.body).message).toBe('Assignment email sent successfully');
+  });
 });
